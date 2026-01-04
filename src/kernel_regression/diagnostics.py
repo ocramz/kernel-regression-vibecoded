@@ -325,22 +325,35 @@ def _dette_munk_wagner_test(
     # Kernel smooth the squared residuals to get variance estimate
     bandwidth = silverman_bandwidth(x_sorted.reshape(-1, 1))[0]
 
-    def kernel_smooth_variance(x: NDArray, r_sq: NDArray, h: float) -> NDArray:
-        """Nadaraya-Watson smoother for variance estimation."""
-        n = len(x)
-        var_est = np.zeros(n)
-        for i in range(n):
-            u = (x - x[i]) / h
-            w = np.exp(-0.5 * u**2)  # Gaussian kernel
-            w_sum = np.sum(w)
-            if w_sum > 0:
-                var_est[i] = np.sum(w * r_sq) / w_sum
-            else:
-                var_est[i] = np.mean(r_sq)
+    def kernel_smooth_variance_vectorized(
+        x: NDArray, r_sq: NDArray, h: float
+    ) -> NDArray:
+        """Vectorized Nadaraya-Watson smoother for variance estimation.
+
+        Uses O(n²) memory but O(n²) time instead of O(n²) loop iterations,
+        which is much faster due to NumPy's optimized broadcasting.
+        """
+        # Compute all pairwise scaled distances: (n, n) matrix
+        # u[i, j] = (x[j] - x[i]) / h
+        u = (x[np.newaxis, :] - x[:, np.newaxis]) / h
+
+        # Gaussian kernel weights: (n, n)
+        w = np.exp(-0.5 * u**2)
+
+        # Normalize weights per row
+        w_sums = np.sum(w, axis=1, keepdims=True)
+        w_sums = np.where(w_sums > 0, w_sums, 1.0)
+        w_normalized = w / w_sums
+
+        # Weighted average of squared residuals
+        var_est = w_normalized @ r_sq
+
         return var_est
 
     # Estimate local variance
-    sigma_sq_local = kernel_smooth_variance(x_sorted, resid_sq_sorted, bandwidth)
+    sigma_sq_local = kernel_smooth_variance_vectorized(
+        x_sorted, resid_sq_sorted, bandwidth
+    )
 
     # Test statistic: integrated squared difference from global mean
     # T = sum((sigma_sq_local - sigma_sq_global)^2)
@@ -362,7 +375,9 @@ def _dette_munk_wagner_test(
         boot_resid_sq_sorted = boot_resid_sq_centered[sort_idx]
 
         # Smooth and compute statistic
-        sigma_sq_boot = kernel_smooth_variance(x_sorted, boot_resid_sq_sorted, bandwidth)
+        sigma_sq_boot = kernel_smooth_variance_vectorized(
+            x_sorted, boot_resid_sq_sorted, bandwidth
+        )
         T_bootstrap[b] = np.sum((sigma_sq_boot - sigma_sq_global) ** 2) / n_samples
 
     # P-value: proportion of bootstrap values >= observed

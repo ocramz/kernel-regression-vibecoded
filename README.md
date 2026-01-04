@@ -173,14 +173,18 @@ CV = (1/n) * Σ((y_i - ŷ_i) / (1 - H_ii))²
 
 where H_ii is the diagonal of the smoothing matrix.
 
+**Note**: This O(n) shortcut applies to Nadaraya-Watson (`polynomial_order=0`). Local polynomial regression falls back to O(n²) refitting since the hat matrix structure is more complex.
+
 ### 2. Silverman/Scott Rule Initialization
 
 Data-driven bandwidth initialization before optimization:
 
 ```
-h = 1.06 * σ * n^(-1/5)  (Silverman)
-h = σ * n^(-1/(d+4))     (Scott)
+h = 1.06 * σ_robust * n^(-1/5)  (Silverman)
+h = σ * n^(-1/(d+4))            (Scott)
 ```
+
+**Note**: Silverman's rule uses a robust scale estimate: `σ_robust = min(std, IQR/1.349)` for stability with outliers.
 
 ### 3. Numerical Regularization
 

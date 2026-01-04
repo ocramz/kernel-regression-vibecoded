@@ -7,6 +7,7 @@ Includes Nadaraya-Watson and Local Polynomial regression with:
 - scipy.linalg.lstsq for numerical stability
 """
 
+from itertools import combinations_with_replacement
 from typing import Callable, Literal
 
 import numpy as np
@@ -532,32 +533,38 @@ class LocalPolynomialRegression(KernelRegression):
         order: int,
     ) -> NDArray[np.floating]:
         """
-        Build polynomial design matrix.
+        Build polynomial design matrix for arbitrary order.
 
-        For multivariate case, includes all polynomial terms up to given order.
+        For multivariate case, includes all polynomial terms up to given order
+        using combinations_with_replacement to generate all monomial terms.
+
+        For example, with 2 features and order=2:
+        - Order 0: [1]
+        - Order 1: [x0, x1]
+        - Order 2: [x0^2, x0*x1, x1^2]
+
+        Args:
+            diff: Centered differences (X - x), shape (n_samples, n_features).
+            order: Maximum polynomial order.
+
+        Returns:
+            Design matrix of shape (n_samples, n_terms).
         """
         n_samples, n_features = diff.shape
 
-        # Start with intercept
+        # Start with intercept (order 0)
         columns = [np.ones(n_samples)]
 
-        if order >= 1:
-            # Linear terms
-            for j in range(n_features):
-                columns.append(diff[:, j])
-
-        if order >= 2:
-            # Quadratic terms: x_j^2 and cross terms x_j * x_k
-            for j in range(n_features):
-                columns.append(diff[:, j] ** 2)
-            for j in range(n_features):
-                for k in range(j + 1, n_features):
-                    columns.append(diff[:, j] * diff[:, k])
-
-        if order >= 3:
-            # Cubic terms
-            for j in range(n_features):
-                columns.append(diff[:, j] ** 3)
+        # Add terms for each order from 1 to `order`
+        for deg in range(1, order + 1):
+            # Generate all combinations of feature indices with replacement
+            # For degree d, we pick d indices (with replacement) from features
+            for indices in combinations_with_replacement(range(n_features), deg):
+                # Compute product of features for this monomial term
+                term = np.ones(n_samples)
+                for idx in indices:
+                    term = term * diff[:, idx]
+                columns.append(term)
 
         return np.column_stack(columns)
 
