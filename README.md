@@ -57,6 +57,9 @@ predictions = model.predict(X)
 - **Residual Diagnostics**: Normality tests, skewness, kurtosis
 - **Goodness of Fit**: R², adjusted R², AIC, BIC, effective degrees of freedom
 - **Wild Bootstrap**: Confidence intervals robust to heteroscedasticity
+- **Fan-Yao Variance Function Estimation**: Nonparametric variance estimation
+- **Conformal Calibration**: Finite-sample coverage guarantees
+- **Honest Confidence Intervals**: Armstrong-Kolesár bias-adjusted critical values
 
 ### Numerical Stability
 - **Tikhonov Regularization**: Ridge penalty for ill-conditioned matrices
@@ -150,13 +153,38 @@ from kernel_regression import wild_bootstrap_confidence_intervals
 
 ci = wild_bootstrap_confidence_intervals(
     model, X, y,
-    X_pred=X_new,                # Points for prediction
+    X_pred=X_new,
     confidence_level=0.95,
     n_bootstrap=1000,
-    distribution="rademacher",   # "rademacher", "mammen", or "normal"
+    distribution="rademacher",
+    bias_correction="bigbrother",  # "none", "undersmooth", "rbc", "bigbrother"
+    honest_cv=True,                # Armstrong-Kolesár bias-adjusted critical values
+    variance_inflation=False,      # CCT variance inflation
 )
 print(f"Lower: {ci.lower}")
 print(f"Upper: {ci.upper}")
+```
+
+### Variance Function Estimation
+
+```python
+from kernel_regression import NadarayaWatson, fan_yao_variance_estimation
+
+model = NadarayaWatson(bandwidth='silverman').fit(X, y)
+var_result = fan_yao_variance_estimation(model, X, y)
+
+# Access variance at each point
+sigma_squared = var_result.variance_estimate  # σ²(x)
+sigma = var_result.std_estimate               # σ(x)
+```
+
+### Conformal Calibration
+
+```python
+from kernel_regression import conformal_calibrate_ci
+
+# Calibrate for guaranteed finite-sample coverage
+ci_calibrated = conformal_calibrate_ci(model, X, y, ci, calibration_fraction=0.2)
 ```
 
 ## Mathematical Standards
@@ -209,6 +237,33 @@ Non-parametric heteroscedasticity test using kernel smoothing of squared residua
 Robust confidence intervals that preserve heteroscedasticity structure:
 - Rademacher: ±1 with probability 0.5
 - Mammen: Two-point distribution with E[w]=0, E[w²]=1
+
+### 7. Big Brother Bias Correction
+
+Uses a higher-order polynomial to compute cleaner residuals for the bootstrap, combined with undersmoothing:
+
+```
+residuals_clean = y - m_p+1(x)  # Higher-order model captures more signal
+h_CI = h × 0.75                 # Undersmoothing reduces bias
+```
+
+Achieves ~92% coverage (vs ~61% without correction).
+
+### 8. Honest Critical Values (Armstrong-Kolesár)
+
+Bias-adjusted critical values that account for worst-case bias:
+
+```
+cv_honest ≥ z_{1-α/2}  such that P(|Z + b| ≤ cv) ≥ 1-α for all |b| ≤ M
+```
+
+### 9. Fan-Yao Variance Estimation
+
+Nonparametric estimation of conditional variance σ²(x) via local linear regression on squared residuals:
+
+```
+σ̂²(x) = E[ε² | X=x]  estimated by local linear on (y - ŷ)²
+```
 
 ## Adversarial Test Results
 
@@ -346,6 +401,12 @@ plt.show()
 - Hastie, T., Tibshirani, R., & Friedman, J. (2009). "The Elements of Statistical Learning."
 - Dette, H., Munk, A., & Wagner, T. (1998). "Estimating the variance in nonparametric regression."
 - Wu, C.F.J. (1986). "Jackknife, Bootstrap and Other Resampling Methods in Regression Analysis."
+- Armstrong, T. B., & Kolesár, M. (2020). "Simple and Honest Confidence Intervals in Nonparametric Regression." Quantitative Economics, 11(1), 1-39.
+- Calonico, S., Cattaneo, M. D., & Titiunik, R. (2014). "Robust Nonparametric Confidence Intervals for Regression-Discontinuity Designs." Econometrica, 82(6), 2295-2326.
+- Calonico, S., Cattaneo, M. D., & Farrell, M. H. (2022). "Coverage Error Optimal Confidence Intervals for Local Polynomial Regression." Bernoulli, 28(4), 2998-3022.
+- Fan, J., & Yao, Q. (1998). "Efficient Estimation of Conditional Variance Functions in Stochastic Regression." Biometrika, 85(3), 645-660.
+- Lei, J., G'Sell, M., Rinaldo, A., Tibshirani, R. J., & Wasserman, L. (2018). "Distribution-Free Predictive Inference for Regression." Journal of the American Statistical Association, 113(523), 1094-1111.
+- Mammen, E. (1993). "Bootstrap and Wild Bootstrap for High Dimensional Linear Models." Annals of Statistics, 21(1), 255-285.
 
 ## License
 

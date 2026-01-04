@@ -25,7 +25,11 @@ from kernel_regression.bandwidth import (
 from kernel_regression.diagnostics import (
     ConfidenceIntervalResult,
     GoodnessOfFit,
+    VarianceFunctionResult,
+    conformal_calibrate_ci,
+    fan_yao_variance_estimation,
     heteroscedasticity_test,
+    heteroscedasticity_weighted_fit,
     residual_diagnostics,
     wild_bootstrap_confidence_intervals,
 )
@@ -70,5 +74,10 @@ __all__ = [
     "heteroscedasticity_test",
     "residual_diagnostics",
     "wild_bootstrap_confidence_intervals",
+    "conformal_calibrate_ci",
     "ConfidenceIntervalResult",
+    # Variance estimation
+    "fan_yao_variance_estimation",
+    "heteroscedasticity_weighted_fit",
+    "VarianceFunctionResult",
 ]

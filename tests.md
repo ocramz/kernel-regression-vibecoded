@@ -74,12 +74,13 @@ The formal validation suite verifies mathematical correctness using synthetic da
 
 ### Test 3: Confidence Interval Coverage
 
-- **Pointwise coverage range:** [66.0%, 100.0%]
-- **Overall coverage:** 88.3%
-- **Method:** "Big Brother" approach combines:
-  1. Higher-order model for cleaner residuals (captures signal, leaves pure noise)
-  2. Undersmoothing (bandwidth * 0.75) to reduce bias in predictions
-- **Note:** Bootstrap CIs achieve near-nominal 95% coverage
+- **Pointwise coverage range:** [74.0%, 100.0%]
+- **Overall coverage:** 92.2%
+- **Method:** Combines multiple academic techniques:
+  1. **Big Brother residuals**: Higher-order model for cleaner bootstrap residuals
+  2. **Undersmoothing**: bandwidth × 0.75 to reduce bias
+  3. **Honest critical values**: Armstrong-Kolesár (2020) bias-adjusted quantiles
+- **Available options:** `honest_cv=True`, `variance_inflation=True`, `conformal_calibrate_ci()`
 
 **Result: PASS**
 
@@ -161,11 +162,37 @@ The irrelevant variable is automatically smoothed out with a bandwidth ~100x lar
 |------|--------|---------|
 | Consistency | PASS | MSE improved 12.39x from n=50 to n=1000 |
 | Convergence Rate | PASS | Estimated rate -0.515, theoretical -0.800 |
-| CI Coverage | PASS | Coverage 88.3% with bigbrother bias correction |
+| CI Coverage | PASS | Coverage 92.2% with bigbrother + honest critical values |
 | Bias-Variance Tradeoff | PASS | Optimal h=0.05, tradeoff verified |
 | Heterosc. Calibration | PASS | Size=9.0%, Power=100.0% |
 | Boundary Bias Reduction | PASS | LP bias=0.0000, NW bias=0.0782 |
 | Variable Selection | PASS | Noise/signal bandwidth ratio = 101.7x |
+
+---
+
+## Academic Methods Implemented
+
+The following peer-reviewed methods are implemented for confidence interval construction:
+
+| Method | Source | Description |
+|--------|--------|-------------|
+| Big Brother Residuals | Novel combination | Higher-order model for cleaner bootstrap residuals |
+| Undersmoothing | Standard practice | h × 0.75 bandwidth reduction for bias control |
+| Honest Critical Values | Armstrong & Kolesár (2020) | Bias-adjusted quantiles for worst-case coverage |
+| Variance Inflation | CCT (2014) Econometrica | Inflate SE for bias estimation uncertainty |
+| Conformal Calibration | Lei et al. (2018) JASA | Finite-sample coverage via conformity scores |
+| Fan-Yao Variance | Fan & Yao (1998) Biometrika | Local linear on squared residuals for σ²(x) |
+| RBC/CCT | Calonico et al. (2014) | Robust bias correction with higher-order polynomial |
+
+### Coverage Comparison
+
+| Method | Coverage | Width |
+|--------|----------|-------|
+| Baseline (none) | 61.2% | 0.109 |
+| Undersmooth | 83.8% | 0.110 |
+| Big Brother | 88.3% | 0.124 |
+| Big Brother + Honest CV | **92.2%** | 0.267 |
+| + Conformal | 100% | 1.02 |
 
 ---
 

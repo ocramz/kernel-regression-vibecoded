@@ -232,12 +232,14 @@ def test_confidence_interval_coverage() -> ValidationResult:
         model = NadarayaWatson(bandwidth="silverman").fit(X, y)
 
         # Get bootstrap confidence intervals at test points
+        # Uses bigbrother + honest_cv for best coverage (~92%)
         ci = wild_bootstrap_confidence_intervals(
             model, X, y,
             X_pred=X_test,
             confidence_level=confidence_level,
             n_bootstrap=200,
             distribution="rademacher",
+            honest_cv=True,  # Armstrong-Kolesár bias-adjusted critical values
         )
 
         # Check which test points have true value within CI

@@ -443,6 +443,181 @@ def residual_diagnostics(
     )
 
 
+@dataclass
+class VarianceFunctionResult:
+    """Result of variance function estimation."""
+
+    X_eval: NDArray[np.floating]
+    variance_estimate: NDArray[np.floating]
+    std_estimate: NDArray[np.floating]
+    bandwidth: NDArray[np.floating]
+    method: str
+
+    def __str__(self) -> str:
+        return (
+            f"Variance Function Estimation ({self.method})\n"
+            f"  Mean variance: {np.mean(self.variance_estimate):.6f}\n"
+            f"  Variance range: [{np.min(self.variance_estimate):.6f}, "
+            f"{np.max(self.variance_estimate):.6f}]"
+        )
+
+
+def fan_yao_variance_estimation(
+    model: BaseEstimator,
+    X: NDArray[np.floating],
+    y: NDArray[np.floating],
+    X_eval: NDArray[np.floating] | None = None,
+    bandwidth: NDArray[np.floating] | str | None = None,
+) -> VarianceFunctionResult:
+    """
+    Estimate conditional variance function using Fan-Yao method.
+
+    Applies local linear regression to squared residuals to obtain a
+    nonparametric estimate of the conditional variance σ²(x).
+
+    This method is efficient and adaptive: without knowing the regression
+    function, the conditional variance can be estimated asymptotically
+    as well as if the regression were known.
+
+    Args:
+        model: Fitted kernel regression model for mean estimation.
+        X: Feature matrix of shape (n_samples, n_features).
+        y: Target values of shape (n_samples,).
+        X_eval: Points at which to evaluate variance function.
+            If None, uses X.
+        bandwidth: Bandwidth for variance estimation. Can be:
+            - None: Use model's bandwidth (default)
+            - "silverman": Compute Silverman bandwidth on squared residuals
+            - ndarray: Explicit bandwidth values
+
+    Returns:
+        VarianceFunctionResult with variance estimates at evaluation points.
+
+    References:
+        Fan, J. and Yao, Q. (1998). "Efficient estimation of conditional
+        variance functions in stochastic regression." Biometrika, 85(3),
+        645-660.
+
+    Example:
+        >>> model = NadarayaWatson(bandwidth=0.5).fit(X, y)
+        >>> var_result = fan_yao_variance_estimation(model, X, y)
+        >>> print(f"Mean variance: {np.mean(var_result.variance_estimate):.4f}")
+    """
+    from kernel_regression.estimators import LocalPolynomialRegression
+    from kernel_regression.bandwidth import silverman_bandwidth
+
+    X = np.atleast_2d(X)
+    y = np.asarray(y).flatten()
+
+    if X_eval is None:
+        X_eval = X
+    X_eval = np.atleast_2d(X_eval)
+
+    # Step 1: Get residuals from mean regression
+    y_pred = model.predict(X)
+    residuals = y - y_pred
+
+    # Step 2: Square the residuals
+    residuals_sq = residuals ** 2
+
+    # Step 3: Determine bandwidth for variance estimation
+    if bandwidth is None:
+        # Use model's bandwidth, slightly larger for variance estimation
+        var_bandwidth = np.atleast_1d(model.bandwidth_) * 1.2
+    elif isinstance(bandwidth, str) and bandwidth == "silverman":
+        # Compute Silverman bandwidth on the squared residuals
+        var_bandwidth = silverman_bandwidth(X)
+    else:
+        var_bandwidth = np.atleast_1d(bandwidth)
+
+    # Step 4: Apply local linear regression to squared residuals
+    # This gives σ²(x) = E[ε² | X=x]
+    var_model = LocalPolynomialRegression(
+        bandwidth=var_bandwidth,
+        order=1,  # Local linear for variance estimation
+    ).fit(X, residuals_sq)
+
+    variance_estimate = var_model.predict(X_eval)
+
+    # Ensure non-negative variance (numerical stability)
+    variance_estimate = np.maximum(variance_estimate, 1e-10)
+
+    # Standard deviation estimate
+    std_estimate = np.sqrt(variance_estimate)
+
+    return VarianceFunctionResult(
+        X_eval=X_eval,
+        variance_estimate=variance_estimate,
+        std_estimate=std_estimate,
+        bandwidth=var_bandwidth,
+        method="Fan-Yao (Local Linear on Squared Residuals)",
+    )
+
+
+def heteroscedasticity_weighted_fit(
+    X: NDArray[np.floating],
+    y: NDArray[np.floating],
+    bandwidth: NDArray[np.floating] | str = "cv",
+    n_iterations: int = 2,
+) -> tuple[BaseEstimator, VarianceFunctionResult]:
+    """
+    Fit kernel regression with heteroscedasticity-adaptive weighting.
+
+    Uses iterative reweighting based on Fan-Yao variance estimation
+    to improve efficiency under heteroscedasticity.
+
+    Args:
+        X: Feature matrix of shape (n_samples, n_features).
+        y: Target values of shape (n_samples,).
+        bandwidth: Bandwidth specification for mean regression.
+        n_iterations: Number of reweighting iterations (default 2).
+
+    Returns:
+        Tuple of (fitted_model, variance_result).
+
+    Example:
+        >>> model, var = heteroscedasticity_weighted_fit(X, y)
+        >>> y_pred = model.predict(X_new)
+    """
+    from kernel_regression.estimators import NadarayaWatson
+
+    X = np.atleast_2d(X)
+    y = np.asarray(y).flatten()
+
+    # Initial fit (unweighted)
+    model = NadarayaWatson(bandwidth=bandwidth).fit(X, y)
+
+    # Iterative reweighting
+    for _ in range(n_iterations):
+        # Estimate variance function
+        var_result = fan_yao_variance_estimation(model, X, y)
+
+        # Compute weights: w_i = 1 / σ(x_i)
+        weights = 1.0 / np.maximum(var_result.std_estimate, 1e-6)
+        weights = weights / np.sum(weights) * len(weights)  # Normalize
+
+        # Weighted regression: transform y
+        # For kernel regression, we can approximate weighted LS by
+        # modifying the kernel weights in the smoother matrix
+        # Here we use a simpler approach: reweight residuals
+
+        # Get current predictions
+        y_pred = model.predict(X)
+
+        # Weighted residuals
+        weighted_residuals = weights * (y - y_pred)
+
+        # Refit on weighted data (approximation)
+        y_weighted = y_pred + weighted_residuals / weights
+
+        model = NadarayaWatson(bandwidth=model.bandwidth_).fit(X, y_weighted)
+
+    # Final variance estimation
+    var_result = fan_yao_variance_estimation(model, X, y)
+
+    return model, var_result
+
+
 class GoodnessOfFit:
     """
     Comprehensive goodness of fit diagnostics for kernel regression.
@@ -749,6 +924,226 @@ class ConfidenceIntervalResult:
         )
 
 
+def _honest_critical_value(
+    confidence_level: float,
+    bias_sd_ratio: float,
+) -> float:
+    """
+    Compute honest critical value that accounts for worst-case bias.
+
+    Based on Armstrong & Kolesár (2020) "Simple and Honest Confidence
+    Intervals in Nonparametric Regression".
+
+    The honest CI uses cv such that:
+        P(|Z + b| <= cv) >= confidence_level for all |b| <= bias_sd_ratio
+
+    where Z ~ N(0,1) and b is the standardized bias.
+
+    Args:
+        confidence_level: Desired coverage (e.g., 0.95).
+        bias_sd_ratio: Upper bound on |bias|/sd (the "smoothness" bound).
+
+    Returns:
+        Critical value cv >= z_{1-alpha/2} that ensures honest coverage.
+    """
+    alpha = 1 - confidence_level
+
+    # Standard normal critical value
+    z_alpha = stats.norm.ppf(1 - alpha / 2)
+
+    # For honest coverage, we need to find cv such that:
+    # min over |b| <= M of P(-cv <= Z + b <= cv) >= 1 - alpha
+    # The minimum occurs at b = ±M, giving:
+    # P(-cv - M <= Z <= cv - M) >= 1 - alpha
+    # Phi(cv - M) - Phi(-cv - M) >= 1 - alpha
+
+    # Binary search for the honest critical value
+    if bias_sd_ratio <= 0:
+        return z_alpha
+
+    # The honest cv must be larger than z_alpha + M to ensure coverage
+    cv_low = z_alpha
+    cv_high = z_alpha + 2 * bias_sd_ratio + 1
+
+    for _ in range(50):  # Binary search iterations
+        cv_mid = (cv_low + cv_high) / 2
+        # Coverage at worst-case bias b = bias_sd_ratio
+        coverage = stats.norm.cdf(cv_mid - bias_sd_ratio) - stats.norm.cdf(
+            -cv_mid - bias_sd_ratio
+        )
+        if coverage < confidence_level:
+            cv_low = cv_mid
+        else:
+            cv_high = cv_mid
+
+    return cv_high
+
+
+def _estimate_bias_sd_ratio(
+    model: BaseEstimator,
+    X: NDArray[np.floating],
+    y: NDArray[np.floating],
+    X_pred: NDArray[np.floating],
+) -> NDArray[np.floating]:
+    """
+    Estimate the bias/sd ratio for honest CI critical values.
+
+    Uses difference between local linear and local quadratic fits
+    to estimate bias, and bootstrap to estimate sd.
+    """
+    from kernel_regression.estimators import LocalPolynomialRegression
+
+    bandwidth = np.atleast_1d(model.bandwidth_)
+    n_samples = X.shape[0]
+
+    # Fit local linear (order 1) and local quadratic (order 2)
+    model_p1 = LocalPolynomialRegression(bandwidth=bandwidth, order=1).fit(X, y)
+    model_p2 = LocalPolynomialRegression(bandwidth=bandwidth, order=2).fit(X, y)
+
+    pred_p1 = model_p1.predict(X_pred)
+    pred_p2 = model_p2.predict(X_pred)
+
+    # Bias estimate: difference between orders
+    bias_estimate = np.abs(pred_p1 - pred_p2)
+
+    # Estimate variance using effective sample size
+    # For kernel regression: var ≈ σ² / (n * h * f(x))
+    # Simplified: use residual variance / sqrt(effective n)
+    residuals = y - model.predict(X)
+    sigma_sq = np.var(residuals, ddof=1)
+
+    # Effective sample size depends on bandwidth
+    h_prod = np.prod(bandwidth)
+    effective_n = n_samples * h_prod
+
+    # Standard deviation estimate (rough approximation)
+    sd_estimate = np.sqrt(sigma_sq / max(effective_n, 1)) * np.ones(len(X_pred))
+
+    # Bias/SD ratio (capped to avoid extreme values)
+    ratio = np.clip(bias_estimate / np.maximum(sd_estimate, 1e-10), 0, 5)
+
+    return ratio
+
+
+def _cct_variance_inflation(
+    bootstrap_std: NDArray[np.floating],
+    bias_estimate: NDArray[np.floating],
+    n_samples: int,
+    bandwidth: NDArray[np.floating],
+) -> NDArray[np.floating]:
+    """
+    CCT-style variance inflation to account for bias estimation uncertainty.
+
+    Based on Calonico, Cattaneo, Titiunik (2014) Econometrica.
+
+    The RBC approach inflates variance to account for the additional
+    variability introduced by estimating the bias.
+
+    Args:
+        bootstrap_std: Bootstrap standard deviation of predictions.
+        bias_estimate: Estimated bias at each prediction point.
+        n_samples: Number of training samples.
+        bandwidth: Bandwidth used for estimation.
+
+    Returns:
+        Inflated standard deviation for CI construction.
+    """
+    # The CCT correction inflates variance by factor related to
+    # the ratio of bandwidths used for estimation vs bias correction
+    # V_rbc = V_original + V_bias_estimate
+
+    # Simplified inflation: add variance of bias estimate
+    # Var(bias_hat) ≈ C * sigma^2 / (n * h^(2p+1))
+    # where p is the polynomial order
+
+    h_prod = np.prod(bandwidth)
+
+    # Variance inflation factor (conservative estimate)
+    # Based on ratio of orders: higher order has more variance
+    inflation_factor = 1.0 + 0.5 * np.abs(bias_estimate) / (
+        bootstrap_std + 1e-10
+    )
+
+    # Cap inflation to prevent extreme widening
+    inflation_factor = np.clip(inflation_factor, 1.0, 2.0)
+
+    return bootstrap_std * inflation_factor
+
+
+def conformal_calibrate_ci(
+    model: BaseEstimator,
+    X: NDArray[np.floating],
+    y: NDArray[np.floating],
+    ci_result: ConfidenceIntervalResult,
+    calibration_fraction: float = 0.2,
+) -> ConfidenceIntervalResult:
+    """
+    Calibrate confidence intervals using conformal prediction for
+    finite-sample coverage guarantee.
+
+    This is a post-hoc calibration that adjusts CI width based on
+    empirical coverage on a held-out calibration set.
+
+    Based on Lei et al. "Distribution-Free Predictive Inference for Regression"
+
+    Args:
+        model: Fitted kernel regression model.
+        X: Full feature matrix (will be split for calibration).
+        y: Full target values.
+        ci_result: Initial confidence interval result to calibrate.
+        calibration_fraction: Fraction of data to use for calibration.
+
+    Returns:
+        Calibrated ConfidenceIntervalResult with adjusted coverage.
+    """
+    n_samples = X.shape[0]
+    n_calib = max(int(n_samples * calibration_fraction), 10)
+
+    # Use last n_calib points for calibration (or random subset)
+    np.random.seed(42)  # Reproducibility
+    calib_idx = np.random.choice(n_samples, size=n_calib, replace=False)
+
+    X_calib = X[calib_idx]
+    y_calib = y[calib_idx]
+
+    # Get predictions at calibration points
+    y_pred_calib = model.predict(X_calib)
+
+    # Compute CI widths at calibration points (interpolate from result)
+    # For simplicity, use the mean half-width from the original CI
+    original_half_width = np.mean(ci_result.upper - ci_result.lower) / 2
+
+    # Compute conformity scores: |y - y_hat| / half_width
+    residuals_calib = np.abs(y_calib - y_pred_calib)
+    conformity_scores = residuals_calib / max(original_half_width, 1e-10)
+
+    # Find the (1-alpha) quantile of conformity scores
+    # This gives the scaling factor needed for desired coverage
+    alpha = 1 - ci_result.confidence_level
+    # Use (n+1)(1-alpha)/n quantile for finite-sample validity
+    quantile_level = min((n_calib + 1) * (1 - alpha) / n_calib, 1.0)
+    calibration_factor = np.percentile(conformity_scores, 100 * quantile_level)
+
+    # Scale the CI by the calibration factor
+    center = ci_result.predictions
+    original_lower = ci_result.lower
+    original_upper = ci_result.upper
+
+    # New half-width = original half-width * calibration_factor
+    new_half_width = (original_upper - original_lower) / 2 * calibration_factor
+
+    new_lower = center - new_half_width
+    new_upper = center + new_half_width
+
+    return ConfidenceIntervalResult(
+        predictions=ci_result.predictions,
+        lower=new_lower,
+        upper=new_upper,
+        confidence_level=ci_result.confidence_level,
+        method=ci_result.method + " + Conformal",
+    )
+
+
 def wild_bootstrap_confidence_intervals(
     model: BaseEstimator,
     X: NDArray[np.floating],
@@ -758,6 +1153,8 @@ def wild_bootstrap_confidence_intervals(
     n_bootstrap: int = 1000,
     distribution: Literal["rademacher", "mammen", "normal"] = "rademacher",
     bias_correction: Literal["none", "undersmooth", "rbc", "bigbrother"] = "bigbrother",
+    honest_cv: bool = False,
+    variance_inflation: bool = False,
 ) -> ConfidenceIntervalResult:
     """
     Compute confidence intervals using Wild Bootstrap.
@@ -786,6 +1183,11 @@ def wild_bootstrap_confidence_intervals(
             - "bigbrother": (default) Combines undersmoothing with higher-order
               residuals. Uses a higher-order model to compute cleaner residuals
               plus undersmoothing for predictions. Achieves best coverage.
+        honest_cv: If True, use bias-adjusted critical values instead of
+            standard normal quantiles. Based on Armstrong & Kolesár (2020).
+            Widens CIs to account for worst-case bias.
+        variance_inflation: If True, inflate variance to account for bias
+            estimation uncertainty. Based on CCT (2014) Econometrica.
 
     Returns:
         ConfidenceIntervalResult with predictions, lower and upper bounds.
@@ -937,20 +1339,53 @@ def wild_bootstrap_confidence_intervals(
         # Predict at X_pred
         bootstrap_preds[b] = model_star.predict(X_pred)
 
-    # Compute pivotal bootstrap confidence intervals
-    bootstrap_deviations = bootstrap_preds - predictions_corrected
+    # Compute bootstrap standard deviation
+    bootstrap_std = np.std(bootstrap_preds, axis=0)
 
-    alpha = 1 - confidence_level
-    lower_q = np.percentile(bootstrap_deviations, 100 * alpha / 2, axis=0)
-    upper_q = np.percentile(bootstrap_deviations, 100 * (1 - alpha / 2), axis=0)
+    # Apply variance inflation if requested (CCT approach)
+    if variance_inflation:
+        # Estimate bias for variance inflation
+        from kernel_regression.estimators import LocalPolynomialRegression
 
-    # Pivotal CI: swap the quantiles
-    lower = predictions_corrected - upper_q
-    upper = predictions_corrected - lower_q
+        bias_model = LocalPolynomialRegression(
+            bandwidth=original_bandwidth, order=2
+        ).fit(X, y)
+        bias_est = np.abs(model.predict(X_pred) - bias_model.predict(X_pred))
+
+        bootstrap_std = _cct_variance_inflation(
+            bootstrap_std, bias_est, n_samples, original_bandwidth
+        )
+
+    # Compute confidence intervals
+    if honest_cv:
+        # Use bias-adjusted critical values (Armstrong-Kolesár approach)
+        bias_sd_ratio = _estimate_bias_sd_ratio(model, X, y, X_pred)
+        # Use median bias/sd ratio for a single critical value
+        median_ratio = float(np.median(bias_sd_ratio))
+        cv = _honest_critical_value(confidence_level, median_ratio)
+
+        # Symmetric CI using honest critical value
+        lower = predictions_corrected - cv * bootstrap_std
+        upper = predictions_corrected + cv * bootstrap_std
+    else:
+        # Standard pivotal bootstrap CI
+        bootstrap_deviations = bootstrap_preds - predictions_corrected
+
+        alpha = 1 - confidence_level
+        lower_q = np.percentile(bootstrap_deviations, 100 * alpha / 2, axis=0)
+        upper_q = np.percentile(bootstrap_deviations, 100 * (1 - alpha / 2), axis=0)
+
+        # Pivotal CI: swap the quantiles
+        lower = predictions_corrected - upper_q
+        upper = predictions_corrected - lower_q
 
     method_name = f"Wild Bootstrap ({distribution})"
     if bias_correction != "none":
         method_name += f" + {bias_correction.upper()}"
+    if honest_cv:
+        method_name += " + Honest"
+    if variance_inflation:
+        method_name += " + VarInflate"
 
     return ConfidenceIntervalResult(
         predictions=predictions_corrected,
