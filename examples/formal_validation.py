@@ -232,14 +232,14 @@ def test_confidence_interval_coverage() -> ValidationResult:
         model = NadarayaWatson(bandwidth="silverman").fit(X, y)
 
         # Get bootstrap confidence intervals at test points
-        # Uses bigbrother + honest_cv for best coverage (~92%)
+        # Uses rbc_studentized for ~95% coverage (CCF 2018, 2022 methodology)
         ci = wild_bootstrap_confidence_intervals(
             model, X, y,
             X_pred=X_test,
             confidence_level=confidence_level,
             n_bootstrap=200,
             distribution="rademacher",
-            honest_cv=True,  # Armstrong-Kolesár bias-adjusted critical values
+            bias_correction="rbc_studentized",  # CCF RBC Studentization
         )
 
         # Check which test points have true value within CI
@@ -253,14 +253,15 @@ def test_confidence_interval_coverage() -> ValidationResult:
     print(f"  Pointwise coverage range: [{pointwise_coverage.min():.1%}, {pointwise_coverage.max():.1%}]")
     print(f"  Overall coverage: {overall_coverage:.1%}")
 
-    # Note: Bootstrap CIs for kernel regression are known to undercover
-    # due to bias. The key test is that coverage is substantially better
-    # than 0% and increases with sample size. Perfect 95% coverage would
-    # require bias-corrected bootstrap methods.
-    # We pass if coverage is reasonable (>50%) - indicating CIs are working
-    passed = bool(overall_coverage > 0.50)
+    # With rbc_studentized (CCF 2018, 2022 methodology), we expect ~95% coverage
+    # The method uses:
+    # 1. Coverage-error optimal bandwidth (h × 0.6)
+    # 2. Higher-order polynomial for bias estimation
+    # 3. RBC Studentization with proper variance inflation
+    # We pass if coverage is at least 90% (allowing for simulation variance)
+    passed = bool(overall_coverage >= 0.90)
 
-    print(f"  Note: Underoverage is expected due to bias in kernel estimates")
+    print(f"  Method: RBC Studentized (CCF 2018, 2022)")
     print(f"  Result: {'PASS' if passed else 'FAIL'}")
 
     return ValidationResult(

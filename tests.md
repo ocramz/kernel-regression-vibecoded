@@ -74,13 +74,13 @@ The formal validation suite verifies mathematical correctness using synthetic da
 
 ### Test 3: Confidence Interval Coverage
 
-- **Pointwise coverage range:** [74.0%, 100.0%]
-- **Overall coverage:** 92.2%
-- **Method:** Combines multiple academic techniques:
-  1. **Big Brother residuals**: Higher-order model for cleaner bootstrap residuals
-  2. **Undersmoothing**: bandwidth × 0.75 to reduce bias
-  3. **Honest critical values**: Armstrong-Kolesár (2020) bias-adjusted quantiles
-- **Available options:** `honest_cv=True`, `variance_inflation=True`, `conformal_calibrate_ci()`
+- **Pointwise coverage range:** [85.0%, 100.0%]
+- **Overall coverage:** 96.3%
+- **Method:** RBC Studentized (CCF 2018, 2022)
+  1. **Coverage-error optimal bandwidth**: h × 0.6 (smaller than MSE-optimal)
+  2. **Higher-order polynomial**: For bias estimation and cleaner residuals
+  3. **RBC Studentization**: Variance inflation accounting for bias estimation uncertainty
+- **Available options:** `bias_correction="rbc_studentized"` for 95%+ coverage
 
 **Result: PASS**
 
@@ -169,7 +169,7 @@ The irrelevant variable is automatically smoothed out with a bandwidth ~100x lar
 |------|--------|---------|
 | Consistency | PASS | MSE improved 12.39x from n=50 to n=1000 |
 | Convergence Rate | PASS | Estimated rate -0.515, theoretical -0.800 |
-| CI Coverage | PASS | Coverage 92.2% with bigbrother + honest critical values |
+| CI Coverage | PASS | Coverage 96.3% with RBC Studentized (CCF 2018, 2022) |
 | Bias-Variance Tradeoff | PASS | Optimal h=0.05, tradeoff verified |
 | Heterosc. Calibration | PASS | Size=1-2%, Power=100.0% (refined DMW) |
 | Boundary Bias Reduction | PASS | LP bias=0.0000, NW bias=0.0782 |
@@ -192,6 +192,7 @@ The following peer-reviewed methods are implemented:
 | Conformal Calibration | Lei et al. (2018) JASA | Finite-sample coverage via conformity scores |
 | Fan-Yao Variance | Fan & Yao (1998) Biometrika | Local linear on squared residuals for σ²(x) |
 | RBC/CCT | Calonico et al. (2014) | Robust bias correction with higher-order polynomial |
+| **RBC Studentized** | CCF (2018, 2022) | CE-optimal bandwidth + RBC variance inflation → 95%+ coverage |
 
 ### Heteroscedasticity Testing (DMW Refinements)
 
@@ -210,7 +211,8 @@ The following peer-reviewed methods are implemented:
 | Baseline (none) | 61.2% | 0.109 |
 | Undersmooth | 83.8% | 0.110 |
 | Big Brother | 88.3% | 0.124 |
-| Big Brother + Honest CV | **92.2%** | 0.267 |
+| Big Brother + Honest CV | 92.2% | 0.267 |
+| **RBC Studentized (CCF)** | **96.3%** | 0.425 |
 | + Conformal | 100% | 1.02 |
 
 ---

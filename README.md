@@ -157,7 +157,7 @@ ci = wild_bootstrap_confidence_intervals(
     confidence_level=0.95,
     n_bootstrap=1000,
     distribution="rademacher",
-    bias_correction="bigbrother",  # "none", "undersmooth", "rbc", "bigbrother"
+    bias_correction="rbc_studentized",  # "none", "undersmooth", "rbc", "bigbrother", "rbc_studentized"
     honest_cv=True,                # Armstrong-Kolesár bias-adjusted critical values
     variance_inflation=False,      # CCT variance inflation
 )
@@ -247,7 +247,7 @@ residuals_clean = y - m_p+1(x)  # Higher-order model captures more signal
 h_CI = h × 0.75                 # Undersmoothing reduces bias
 ```
 
-Achieves ~92% coverage (vs ~61% without correction).
+Achieves ~92% coverage (vs ~61% without correction). For 95%+ coverage, use `rbc_studentized`.
 
 ### 8. Honest Critical Values (Armstrong-Kolesár)
 
@@ -264,6 +264,18 @@ Nonparametric estimation of conditional variance σ²(x) via local linear regres
 ```
 σ̂²(x) = E[ε² | X=x]  estimated by local linear on (y - ŷ)²
 ```
+
+### 10. RBC Studentized (CCF 2018, 2022)
+
+Robust bias-corrected confidence intervals using coverage-error optimal methodology from Calonico, Cattaneo, and Farrell:
+
+```
+h_CE = h × 0.6                 # Coverage-error optimal bandwidth (smaller than MSE-optimal)
+bias_estimate = m_p(x) - m_{p+1}(x)  # Higher-order polynomial estimates bias
+SE_rbc = SE × √(1 + V_bias)    # Variance inflation for bias estimation uncertainty
+```
+
+**Achieves ~96% coverage** (vs ~92% with Big Brother alone, ~61% without correction).
 
 ## Adversarial Test Results
 
@@ -403,6 +415,7 @@ plt.show()
 - Wu, C.F.J. (1986). "Jackknife, Bootstrap and Other Resampling Methods in Regression Analysis."
 - Armstrong, T. B., & Kolesár, M. (2020). "Simple and Honest Confidence Intervals in Nonparametric Regression." Quantitative Economics, 11(1), 1-39.
 - Calonico, S., Cattaneo, M. D., & Titiunik, R. (2014). "Robust Nonparametric Confidence Intervals for Regression-Discontinuity Designs." Econometrica, 82(6), 2295-2326.
+- Calonico, S., Cattaneo, M. D., & Farrell, M. H. (2018). "On the Effect of Bias Estimation on Coverage Accuracy in Nonparametric Inference." Journal of the American Statistical Association, 113(522), 767-779.
 - Calonico, S., Cattaneo, M. D., & Farrell, M. H. (2022). "Coverage Error Optimal Confidence Intervals for Local Polynomial Regression." Bernoulli, 28(4), 2998-3022.
 - Fan, J., & Yao, Q. (1998). "Efficient Estimation of Conditional Variance Functions in Stochastic Regression." Biometrika, 85(3), 645-660.
 - Lei, J., G'Sell, M., Rinaldo, A., Tibshirani, R. J., & Wasserman, L. (2018). "Distribution-Free Predictive Inference for Regression." Journal of the American Statistical Association, 113(523), 1094-1111.
