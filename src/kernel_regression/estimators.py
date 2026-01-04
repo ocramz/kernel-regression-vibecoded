@@ -7,6 +7,7 @@ Includes Nadaraya-Watson and Local Polynomial regression with:
 - scipy.linalg.lstsq for numerical stability
 """
 
+import warnings
 from itertools import combinations_with_replacement
 from typing import Callable, Literal
 
@@ -132,6 +133,27 @@ class KernelRegression(RegressorMixin, BaseEstimator):
             Fitted estimator
         """
         X, y = self._validate_data_fit(X, y)
+
+        n_samples, n_features = X.shape
+
+        # Warn about curse of dimensionality (once per fit, not per prediction)
+        if n_features > 5:
+            # Stone (1980): optimal rate is n^(-4/(d+4)), so effective sample
+            # size drops rapidly with d. Heuristic: need ~100 samples per
+            # dimension as a minimum for reliable local averaging.
+            min_recommended = 100 * n_features
+            if n_samples < min_recommended:
+                warnings.warn(
+                    f"High dimensionality: {n_features} features with {n_samples} "
+                    f"samples. Kernel regression suffers from the curse of "
+                    f"dimensionality - local neighborhoods become sparse. "
+                    f"Consider: (1) dimensionality reduction (PCA), "
+                    f"(2) using at least {min_recommended} samples, or "
+                    f"(3) per-dimension bandwidth with CrossValidatedBandwidth("
+                    f"per_dimension=True) to smooth out irrelevant features.",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         self.X_ = X
         self.y_ = y

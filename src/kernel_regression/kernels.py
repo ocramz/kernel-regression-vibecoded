@@ -4,7 +4,6 @@ Kernel functions for nonparametric regression.
 All kernels are normalized and support vectorized operations.
 """
 
-import warnings
 from typing import Callable
 
 import numpy as np
@@ -220,23 +219,6 @@ def multivariate_kernel_weights(
     bandwidth = np.atleast_1d(bandwidth)
 
     n_features = x_i.shape[1]
-    n_samples = x_i.shape[0]
-
-    # Warn about curse of dimensionality in high dimensions
-    if n_features > 3:
-        # Rule of thumb: need n >> 2^d samples for reliable kernel estimation
-        min_samples_heuristic = 2 ** n_features
-        if n_samples < min_samples_heuristic:
-            warnings.warn(
-                f"High dimensionality detected: {n_features} features with only "
-                f"{n_samples} samples. Kernel regression suffers from the curse of "
-                f"dimensionality - 'local' neighborhoods become sparse in high "
-                f"dimensions. Consider dimensionality reduction or using at least "
-                f"{min_samples_heuristic} samples (2^d heuristic). Results may be "
-                f"unreliable.",
-                UserWarning,
-                stacklevel=3,
-            )
 
     if bandwidth.size == 1:
         bandwidth = np.full(n_features, bandwidth[0])
